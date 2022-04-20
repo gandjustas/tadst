@@ -1,46 +1,64 @@
 ﻿using System;
+using System.IO;
+using System.Linq;
+using System.Runtime.Serialization;
 
 namespace TADST
 {
     [Serializable]
-    class Mod
+    sealed class Mod: IEquatable<Mod>
     {
-        private string _name;
-        private bool _isChecked;
+        public string Name { get; set; }
+        public string Path { get; set; }
 
-        public string Name
+        public bool IsChecked { get; set; }
+
+        public ModSource Source { get; set; }
+
+        public bool Equals(Mod other)
         {
-            get { return _name; }
-            set { _name = value; }
+            return other == null ? false : (this.Source == other.Source && this.Path == other.Path);
+        }
+        public override bool Equals(object obj)
+        {
+            return this.Equals(obj as Mod);
         }
 
-        public bool IsChecked
+        public override int GetHashCode()
         {
-            get { return _isChecked; }
-            set { _isChecked = value; }
+            return this.Source.GetHashCode() ^ this.Path.GetHashCode();
         }
-
-        public Mod()
-        {
-            Name = "";
-            IsChecked = false;
-        }
-
-        public Mod(string name)
-        {
-            Name = name;
-            IsChecked = false;
-        }
-
-        public Mod(string name, bool isChecked)
-        {
-            Name = name;
-            IsChecked = isChecked;
-        }
-
         public override string ToString()
         {
             return Name;
         }
+        public static string GetModName(string path)
+        {
+            var meta = System.IO.Path.Combine(path, "meta.cpp");
+            if (!File.Exists(meta)) return System.IO.Path.GetFileName(path);
+
+            foreach (var line in File.ReadLines(meta))
+            {
+                var p = line.Split('=', ';');
+                if (p.Length == 2 && p[0].Trim() == "name")
+                {
+                    return p[1].Trim('\"');
+                }
+            }
+            return System.IO.Path.GetFileName(path);
+        }
+
+        public static bool IsModDir(string directory)
+        {
+            var addons = System.IO.Path.Combine(directory, "addons");
+            return Directory.Exists(addons) && Directory.EnumerateFiles(addons, "*.?bo").Any();
+        }
+    }
+
+    enum ModSource
+    {
+        GameDir = 0,
+        Steam = 1,
+        Custom = 2,
     }
 }

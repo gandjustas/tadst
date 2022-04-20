@@ -13,7 +13,6 @@ namespace TADST
         public ProfileHandler()
         {
             Profiles = new List<Profile>();
-            InitProfiles();
         }
 
         public List<Profile> Profiles

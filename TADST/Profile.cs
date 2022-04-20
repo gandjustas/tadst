@@ -1,4 +1,6 @@
-﻿using System;
+﻿using Microsoft.Win32;
+using Newtonsoft.Json;
+using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -137,14 +139,20 @@ namespace TADST
         /// </summary>
         public Profile()
         {
+
+
             ProfileName = "default";
             InGameName = "server";
-            ServerExePath = "";
+            using (var regKey = Registry.LocalMachine.OpenSubKey(@"SOFTWARE\WOW6432Node\bohemia interactive\arma 3"))
+            {
+                var armaPath = (string)regKey.GetValue("main");
+                ServerExePath = Path.Combine(armaPath, "arma3server_x64.exe");
+            }
             ConsoleLogfile = "";
             PidFile = "";
             RankingFile = "";
 
-            Beta = false;
+            Debug = false;
             ToolTips = true;
             LaunchAsIs = false;
 
@@ -166,8 +174,8 @@ namespace TADST
             SetDefaultPerformance();
             SetDefaultView();
 
-            ScanMissions();
-            ScanMods();
+            //ScanMissions();
+            //ScanMods();
         }
 
         private void SetDefaultServerDetails()
@@ -251,7 +259,9 @@ namespace TADST
         /// <returns>All .pbo files in MPMissions folder</returns>
         private IEnumerable<string> ScanMissionsFolder()
         {
-            var mpMissions = Path.Combine(Environment.CurrentDirectory, "MPMissions");
+            if (string.IsNullOrEmpty(ServerExePath)) return Enumerable.Empty<string>();
+
+            var mpMissions = Path.Combine(Path.GetDirectoryName(ServerExePath), "MPMissions");
             var folder = new DirectoryInfo(mpMissions);
 
             if (Directory.Exists(mpMissions))
@@ -261,7 +271,7 @@ namespace TADST
                 return fileList.Union(folderList).OrderBy(s => s);
             }
 
-            return null;
+            return Enumerable.Empty<string>();
         }
 
         /// <summary>
@@ -287,9 +297,9 @@ namespace TADST
         {
             for (var index = 0; index < _missions.Count; index++)
             {
-                if (!File.Exists(Path.Combine(Environment.CurrentDirectory, "MPMissions\\" + _missions[index].Name))
+                if (!File.Exists(Path.Combine(Path.GetDirectoryName(ServerExePath), "MPMissions\\" + _missions[index].Name))
                     &&
-                    !Directory.Exists(Path.Combine(Environment.CurrentDirectory, "MPMissions\\" + _missions[index].Name)))
+                    !Directory.Exists(Path.Combine(Path.GetDirectoryName(ServerExePath), "MPMissions\\" + _missions[index].Name)))
                 {
                     _missions.RemoveAt(index);
                 }
@@ -315,50 +325,45 @@ namespace TADST
         /// Scan game directory for mod folders
         /// </summary>
         /// <returns></returns>
-        private IEnumerable<DirectoryInfo> ScanModFolders()
+        private IEnumerable<Mod> ScanModFolders()
         {
-            var runPath = Environment.CurrentDirectory;
-            var runFolder = new DirectoryInfo(Path.GetFullPath(runPath));
-            IEnumerable<DirectoryInfo> modFolders = runFolder.GetDirectories();
+            var gameDir = Path.GetDirectoryName(ServerExePath);
 
-            return modFolders.OrderBy(x => x.Name);
+            return Directory.EnumerateDirectories(gameDir)
+                            .Where(Mod.IsModDir)
+                            .Select(d => new Mod { Name = Path.GetFileName(d), Path = Path.GetFileName(d), Source = ModSource.GameDir })
+                            .Concat(
+                                Directory.EnumerateDirectories(Path.Combine(gameDir, "!Workshop"))
+                                         .Where(Mod.IsModDir)
+                                         .Select(d => new Mod { Name = Mod.GetModName(d), Path = d, Source = ModSource.Steam }))
+            ;
         }
+
+
+
 
         /// <summary>
         /// Scan game directory for mods and add them to list
         /// </summary>
         public void ScanMods()
         {
-            var modFolders = ScanModFolders();
+            var mods = ScanModFolders();
 
-            foreach (var modFolder in modFolders)
+            foreach (var mod in mods)
             {
-                if (!(_mods.Any(x => x.Name == modFolder.Name)))
+                if (!_mods.Contains(mod))
                 {
-                    _mods.Add(new Mod(modFolder.Name, false));
+                    _mods.Add(mod);
+                }
+                else
+                {
+                    _mods.Find(m => m.Equals(mod)).Name = mod.Name;
                 }
             }
 
-            AddBetaModFolders();
             ValidateMods();
         }
 
-        /// <summary>
-        /// Add beta folders to mods list
-        /// </summary>
-        private void AddBetaModFolders()
-        {
-            var betaFolders = new[] {@"Expansion\beta", @"Expansion\beta\expansion"};
-            foreach (var betaFolder in betaFolders)
-            {
-                if (!Directory.Exists(Path.Combine(Environment.CurrentDirectory, betaFolder))) continue;
-
-                if (!(_mods.Any(x => x.Name == betaFolder)))
-                {
-                    _mods.Add(new Mod(betaFolder, false));
-                }
-            }
-        }
 
         /// <summary>
         /// Remove all game folder and validate that all mods actually exists on disk
@@ -385,14 +390,6 @@ namespace TADST
                                          "logs"
                                      };
             _mods.RemoveAll(x => filesToExclude.Contains(x.Name.ToLower()));
-
-            for (var index = 0; index < _mods.Count; index++)
-            {
-                if (!Directory.Exists(Path.Combine(Environment.CurrentDirectory, _mods[index].Name)))
-                {
-                    _mods.RemoveAt(index);
-                }
-            }
         }
 
         /// <summary>
@@ -401,7 +398,7 @@ namespace TADST
         /// <returns>String of all startup parameters</returns>
         public string GetStartupParameters()
         {
-            var profileFolder = Path.Combine(Environment.CurrentDirectory, "TADST", ProfileName);
+            var profileFolder = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "TADST", ProfileName);
             var configFile = Path.Combine(profileFolder, "TADST_config.cfg");
             var basicConfigFile = Path.Combine(profileFolder, "TADST_basic.cfg");
             var parameters = "";
@@ -411,8 +408,12 @@ namespace TADST
                 " \"-config=" + configFile + "\"" +
                 " \"-cfg=" + basicConfigFile + "\"" +
                 " \"-profiles=" + profileFolder + "\"" +
-                " -name=" + ProfileName +
-                " -filePatching";
+                " -name=" + ProfileName;
+
+            if (AllowFilePatching > 0)
+            {
+                parameters += " -filePatching";
+            }
 
             if (Netlog)
             {
@@ -430,7 +431,7 @@ namespace TADST
 
             if (NumOfCheckedMods() > 0)
             {
-                parameters += " \"-mod=" + GetModsString() + "\"";
+                parameters += " \"-mod=" + string.Join(";", Mods.Where(m => m.IsChecked).Select(m => m.Path)) + "\"";
             }
 
             if (PersistantBattlefield && AutoInit)
@@ -439,13 +440,9 @@ namespace TADST
             }
 
             // Create beta commandline
-            if (Beta)
+            if (Debug)
             {
-                if (ServerExePath.EndsWith("arma2oaserver.exe"))
-                    parameters += @" -beta=Expansion\beta;Expansion\beta\Expansion";
-
-                if (ServerExePath.EndsWith("arma2server.exe"))
-                    parameters += @" -beta=beta";
+                parameters += " -debug";
             }
 
             if (EnableHt)
@@ -456,23 +453,6 @@ namespace TADST
             if (!string.IsNullOrEmpty(ExtraParameters)) parameters += " " + ExtraParameters;
 
             return parameters;
-        }
-
-        /// <summary>
-        /// Get string of checked mods for startup parameters
-        /// </summary>
-        /// <returns>String of mods separated by semicolons</returns>
-        public string GetModsString()
-        {
-            var modsString = "";
-
-            for (var i = 0; i < Mods.Count; i++)
-            {
-                if (Mods[i].IsChecked)
-                    modsString += Mods[i].Name + ";";
-            }
-
-            return modsString.TrimEnd(';');
         }
 
         private int NumOfCheckedMods()
@@ -493,7 +473,10 @@ namespace TADST
         /// </summary>
         public void SortMods()
         {
-            Mods.Sort((modA, modB) => String.Compare(modA.Name, modB.Name));
+            Mods.Sort((modA, modB) => {
+                    var s = modA.Source.CompareTo(modB.Source);
+                return s == 0 ? String.Compare(modA.Name, modB.Name) : s;
+                });
         }
 
         public override string ToString()
@@ -699,7 +682,7 @@ namespace TADST
             set { _missionDifficulty = value; }
         }
 
-        public List<Mod> Mods
+        public List<Mod> Mods 
         {
             get { return _mods; }
             set { _mods = value; }
@@ -861,7 +844,7 @@ namespace TADST
             set { _requiredSecureId = value; }
         }
 
-        public bool Beta
+        public bool Debug
         {
             get { return _beta; }
             set { _beta = value; }

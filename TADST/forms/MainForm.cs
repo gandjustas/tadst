@@ -39,20 +39,11 @@ namespace TADST
 
         private void ValidateCurrentDirectory()
         {
-            var path = Path.Combine(Environment.CurrentDirectory, "MPMissions");
-            if (!Directory.Exists(path))
-            {
-                MessageBox.Show("Are you sure you've put TADST in your ArmA game folder? " + Environment.NewLine +
-                                "No 'MPMissions' folder is present in the current folder", "Cannot run TADST",
-                                MessageBoxButtons.OK, MessageBoxIcon.Stop);
-                Close();
-            }
         }
 
         private static ProfileHandler GetProfileHandler()
         {
-            var path = Path.Combine(Environment.CurrentDirectory, @"TADST\TADST.profiles");
-            return File.Exists(path) ? LoadProfilesFromDisk() : new ProfileHandler();
+            return LoadProfilesFromDisk();
         }
 
         private void InitGui()
@@ -135,8 +126,11 @@ namespace TADST
             UpdateGuiServerLogging();
             UpdateGuiServerRules();
             UpdateGuiMissionFilter();
-            UpdateGuiMissions();
-            UpdateGuiMods();
+            if(!string.IsNullOrEmpty(_activeProfile.ServerExePath))
+            {
+                UpdateGuiMissions();
+                UpdateGuiMods();
+            }
             UpdateGuiStartupParameters();
             UpdateGuiPerformance();
             UpdateGuiView();
@@ -299,7 +293,7 @@ namespace TADST
             txtExtraParameters.Text = _activeProfile.ExtraParameters;
             //txtIngameName.Text = _activeProfile.InGameName;
 
-            chkBeta.Checked = _activeProfile.Beta;
+            chkDebug.Checked = _activeProfile.Debug;
             chkTooltips.Checked = _activeProfile.ToolTips;
             chkStartAsIs.Checked = _activeProfile.LaunchAsIs;
             chkAutoExit.Checked = _activeProfile.AutoExit;
@@ -389,12 +383,11 @@ namespace TADST
         /// </summary>
         private void SaveProfilesToDisk()
         {
-            var serializer = new BinaryFormatter();
-
-            var filename = Path.Combine(Environment.CurrentDirectory, @"TADST\TADST.profiles");
-            using (FileStream fileStream = File.OpenWrite(filename))
-            {
-                serializer.Serialize(fileStream, _profileHandler);
+            var path = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "TADST");
+            Directory.CreateDirectory(path);
+            foreach (var profile in _profileHandler.Profiles)
+            {                
+                File.WriteAllText(Path.Combine(path, profile.ProfileName + ".json"), Newtonsoft.Json.JsonConvert.SerializeObject(profile, Newtonsoft.Json.Formatting.Indented));
             }
         }
 
@@ -404,29 +397,20 @@ namespace TADST
         /// <returns>A ProfileHandler object deserialized from disk</returns>
         private static ProfileHandler LoadProfilesFromDisk()
         {
-            var serializer = new BinaryFormatter();
-            var filename = Path.Combine(Environment.CurrentDirectory, @"TADST\TADST.profiles");
-
-            using (FileStream fileStream = File.OpenRead(filename))
+            var path = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "TADST");
+            
+            var ph = new ProfileHandler();
+            if (Directory.Exists(path))
             {
-                ProfileHandler profileHandler;
-
-                try
-                {
-                    profileHandler = (ProfileHandler) serializer.Deserialize(fileStream);
-                }
-                catch (System.Runtime.Serialization.SerializationException)
-                {
-                    MessageBox.Show(
-                        "Sorry, your 'TADST.profiles' file is either corrupted or incompatible with the current version of TADST. "
-                        + Environment.NewLine + Environment.NewLine
-                        + "Please remove it or save profile to overwrite it.", "SAVE FILE CORRUPTION!",
-                        MessageBoxButtons.OK, MessageBoxIcon.Warning);
-
-                    profileHandler = new ProfileHandler();
-                }
-                return profileHandler;
+                ph.Profiles = Directory.EnumerateFiles(path, "*.json").Select(f => Newtonsoft.Json.JsonConvert.DeserializeObject<Profile>(File.ReadAllText(f))).ToList();
             }
+
+            if(ph.Profiles.Count == 0)
+            { 
+                ph.AddProfile(new Profile());
+            }
+
+            return ph;
         }
 
         /// <summary>
@@ -832,8 +816,8 @@ namespace TADST
             if (_profileHandler.UpdateProfile(cmbProfiles.SelectedIndex, _activeProfile))
             {
                 _profileIndex = cmbProfiles.SelectedIndex;
-                UpdateProfiles();
                 SaveProfilesToDisk();
+                UpdateProfiles();
             }
         }
 
@@ -865,8 +849,11 @@ namespace TADST
             _activeProfile = Utilities.DeepClone(_profileHandler.GetProfile(index));
             _fileHandler = new FileHandler(_activeProfile);
             cmbMissionFilter.SelectedIndex = 0;
-            _activeProfile.ScanMissions();
-            _activeProfile.ScanMods();
+            if(!string.IsNullOrEmpty( _activeProfile.ServerExePath))
+            {
+                _activeProfile.ScanMissions();
+                _activeProfile.ScanMods();
+            }
             _profileIndex = index;
             UpdateGui();
 
@@ -943,10 +930,17 @@ namespace TADST
         private void txtServerExe_TextChanged(object sender, EventArgs e)
         {
             _activeProfile.ServerExePath = txtServerExe.Text;
-            chkBeta.Checked = (_activeProfile.ServerExePath.Contains(@"\beta") &&
+            chkDebug.Checked = (_activeProfile.ServerExePath.Contains(@"\beta") &&
                                _activeProfile.ServerExePath.Contains("arma2"))
                                   ? true
                                   : false;
+
+
+            if (!string.IsNullOrEmpty(_activeProfile.ServerExePath))
+            {
+                UpdateGuiMissions();
+                UpdateGuiMods();
+            }
         }
 
         private void numVoteMissionPlayers_ValueChanged(object sender, EventArgs e)
@@ -1150,7 +1144,6 @@ namespace TADST
                     _profileIndex = 0;
                     _fileHandler.DeleteProfile(profileName);
                     UpdateProfiles();
-                    SaveProfilesToDisk();
                 }
             }
         }
@@ -1202,12 +1195,16 @@ namespace TADST
         {
             var fileDialog = new OpenFileDialog
                                  {
-                                     InitialDirectory = Environment.CurrentDirectory,
+                                     InitialDirectory = string.IsNullOrEmpty(txtServerExe.Text) ? Environment.CurrentDirectory: Path.GetDirectoryName(txtServerExe.Text),
                                      Filter = "Arma Server Files|*server.exe;*server_x64.exe|Any file|*.*"
                                  };
 
-            fileDialog.ShowDialog();
-            txtServerExe.Text = fileDialog.FileName;
+            if (fileDialog.ShowDialog() == DialogResult.OK)
+            { 
+                txtServerExe.Text = fileDialog.FileName;
+            }
+            
+
         }
 
         private void btnMonitorRpt_Click(object sender, EventArgs e)
@@ -1218,7 +1215,7 @@ namespace TADST
                 MessageBox.Show("No RPT file present", "TADST", MessageBoxButtons.OK, MessageBoxIcon.Information);
                 return;
             }
-            var file = Path.Combine(Environment.CurrentDirectory, "TADST", _activeProfile.ProfileName, rptFile);
+            var file = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "TADST", _activeProfile.ProfileName, rptFile);
             OpenMonitor(file, "Rpt");
         }
 
@@ -1385,28 +1382,8 @@ namespace TADST
             if (File.Exists(txtServerExe.Text))
             {
                 string serverPath = txtServerExe.Text; // get server exe filepath
-                int index = serverPath.LastIndexOf(@"\", StringComparison.Ordinal) + 1;
-                // get index of filename in string
-                string serverExeName = serverPath.Substring(index); // get exe name only
-                string serverExePath = serverPath.Substring(0, index); // get folder only
-
-                // set game exe filename
-                string exeName;
-                switch (serverExeName)
-                {
-                    case "arma2oaserver.exe":
-                        exeName = serverExePath + "arma2oa.exe";
-                        break;
-                    case "arma2server.exe":
-                        exeName = serverExePath + "arma2.exe";
-                        break;
-                    default:
-                        exeName = serverExePath + "arma3.exe";
-                        break;
-                }
-
                 // get buildnumber from game exe
-                FileVersionInfo serverExeInfo = FileVersionInfo.GetVersionInfo(exeName);
+                FileVersionInfo serverExeInfo = FileVersionInfo.GetVersionInfo(serverPath);
                 txtRequiredBuild.Text = "" + serverExeInfo.FileBuildPart + serverExeInfo.FilePrivatePart;
             }
         }
@@ -1671,7 +1648,12 @@ namespace TADST
 
             if (!string.IsNullOrEmpty(path))
             {
-                _activeProfile.Mods.Insert(0, new Mod(path, true));
+                _activeProfile.Mods.Add(new Mod { 
+                    IsChecked = true,
+                    Source = ModSource.Custom,
+                    Path = path,
+                    Name = path
+                });
                 UpdateGuiMods();
                 IsDirty = true;
             }
@@ -1825,7 +1807,7 @@ namespace TADST
             try
             {
                 _fileHandler.CreateConfigFiles();
-                Process.Start(Path.Combine(Environment.CurrentDirectory, "TADST", _activeProfile.ProfileName));
+                Process.Start(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "TADST", _activeProfile.ProfileName));
             }
             catch (Exception exception)
             {
@@ -1870,7 +1852,7 @@ namespace TADST
                 return;
             }
 
-            if (File.Exists(Path.Combine(Environment.CurrentDirectory, "TADST", _activeProfile.ProfileName, file)))
+            if (File.Exists(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "TADST", _activeProfile.ProfileName, file)))
             {
                 if (MessageBox.Show("Delete '" + file + "'. Are you sure?",
                                     "Delete RPT", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) == DialogResult.Yes)
@@ -1898,7 +1880,7 @@ namespace TADST
             if (chkStartAsIs.Checked)
             {
                 var info =
-                    new AsIsInfoForm(Path.Combine(Environment.CurrentDirectory, "TADST", _activeProfile.ProfileName));
+                    new AsIsInfoForm(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "TADST", _activeProfile.ProfileName));
                 info.ShowDialog();
             }
         }
@@ -1945,12 +1927,11 @@ namespace TADST
         {
             if (!e.Data.GetDataPresent(DataFormats.FileDrop)) return;
 
-            var names = (string[]) e.Data.GetData(DataFormats.FileDrop, false);
+            var files = (string[]) e.Data.GetData(DataFormats.FileDrop, false);
 
-            foreach (var name in names)
-            {
-                _activeProfile.Mods.Insert(0, new Mod {Name = name, IsChecked = true});
-            }
+            _activeProfile.Mods.AddRange(
+                files.Where(f => Mod.IsModDir(f) || f.EndsWith(".pbo") || f.EndsWith(".ebo"))
+                .Select(path => new Mod { Name = path, Path=path,  IsChecked = true, Source = ModSource.Custom }));
 
             UpdateGuiMods();
         }
@@ -1962,7 +1943,7 @@ namespace TADST
 
         private void btnMonitorNetLog_Click(object sender, EventArgs e)
         {
-            var file = Path.Combine(Environment.CurrentDirectory, "net.log");
+            var file = Path.Combine(Path.GetDirectoryName(_activeProfile.ServerExePath), "net.log");
 
             if (!File.Exists(file))
             {
@@ -2056,9 +2037,9 @@ namespace TADST
         }
 
 
-        private void chkBeta_CheckedChanged(object sender, EventArgs e)
+        private void chkDebug_CheckedChanged(object sender, EventArgs e)
         {
-            _activeProfile.Beta = chkBeta.Checked;
+            _activeProfile.Debug = chkDebug.Checked;
             UpdateGuiStartupParameters();
         }
 

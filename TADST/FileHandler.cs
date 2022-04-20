@@ -43,7 +43,7 @@ namespace TADST
 
         private static string GetTADSTPath()
         {
-            return Path.Combine(Environment.CurrentDirectory, "TADST");
+            return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "TADST");
         }
 
         public bool OpenRpt()
@@ -85,7 +85,7 @@ namespace TADST
 
         public bool OpenNetlog()
         {
-            var file = Path.Combine(GetRunPath(), "net.log");
+            var file = Path.Combine(Path.GetDirectoryName(ActiveProfile.ServerExePath), "net.log");
 
             if (File.Exists(file))
             {
@@ -97,7 +97,7 @@ namespace TADST
 
         public void DeleteNetLog()
         {
-            var file = Path.Combine(GetRunPath(), "net.log");
+            var file = Path.Combine(Path.GetDirectoryName(ActiveProfile.ServerExePath), "net.log");
 
             if (File.Exists(file))
             {
@@ -107,8 +107,8 @@ namespace TADST
 
         public void RotateNetLog(string newName)
         {
-            var file = Path.Combine(GetRunPath(), "net.log");
-            var newFile = Path.Combine(GetRunPath(), newName);
+            var file = Path.Combine(Path.GetDirectoryName(ActiveProfile.ServerExePath), "net.log");
+            var newFile = Path.Combine(Path.GetDirectoryName(ActiveProfile.ServerExePath), newName);
 
             if (File.Exists(file))
             {
@@ -540,7 +540,7 @@ namespace TADST
 
         private IEnumerable<string> GetFileArray()
         {
-            var path = Path.Combine(Environment.CurrentDirectory, "TADST", ActiveProfile.ProfileName);
+            var path = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "TADST", ActiveProfile.ProfileName);
             var configFile = Path.Combine(path, "TADST_config.cfg");
             var basicConfigFile = Path.Combine(path, "TADST_basic.cfg");
             var arma2Profile = Path.Combine(path, "Users", ActiveProfile.ProfileName,
@@ -583,7 +583,7 @@ namespace TADST
 
             var serverProcess = new ProcessStartInfo(file)
                                     {
-                                        WorkingDirectory = Environment.CurrentDirectory,
+                                        WorkingDirectory = Path.GetDirectoryName(ActiveProfile.ServerExePath),
                                         Arguments = ActiveProfile.GetStartupParameters()
                                     };
 
@@ -597,7 +597,7 @@ namespace TADST
 
         internal void DeleteProfile(string profileName)
         {
-            var path = Path.Combine(Environment.CurrentDirectory, "TADST", profileName);
+            var path = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "TADST", profileName);
 
             if (Directory.Exists(path))
             {
@@ -609,6 +609,8 @@ namespace TADST
                 {
                 }
             }
+
+            File.Delete(Path.Combine(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "TADST"), profileName + ".json"));
         }
 
 
@@ -633,7 +635,7 @@ namespace TADST
         private string GetArma3Rpt()
         {
             var folder =
-                new DirectoryInfo(Path.Combine(Environment.CurrentDirectory, "TADST", ActiveProfile.ProfileName));
+                new DirectoryInfo(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "TADST", ActiveProfile.ProfileName));
             FileInfo[] fileInfo = folder.GetFiles("*.rpt");
             List<String> fileNames = fileInfo.Select(info => info.Name).ToList();
 
